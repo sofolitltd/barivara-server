@@ -29,6 +29,22 @@ func (h *Handler) HandleCronReminders(c *gin.Context) {
 
 	resp := types.CronResp{}
 	for _, prop := range props {
+		if !prop.SmsEnabled {
+			log.Printf("skip property %s: sms disabled", prop.ID)
+			continue
+		}
+
+		plan, err := h.FB.GetUserPlan(ctx, prop.OwnerID)
+		if err != nil {
+			log.Printf("skip property %s: cannot check owner plan: %v", prop.ID, err)
+			resp.Failed++
+			continue
+		}
+		if plan != "pro" {
+			log.Printf("skip property %s: owner plan is %s (pro required)", prop.ID, plan)
+			continue
+		}
+
 		renters, err := h.FB.QueryActiveRentersByProperty(ctx, prop.ID)
 		if err != nil {
 			log.Printf("skip property %s: %v", prop.ID, err)

@@ -43,6 +43,18 @@ func (h *Handler) sendReceipt(ctx context.Context, renterID, invoiceID string) (
 		return types.SendResp{}, fmt.Errorf("property not found: %w", err)
 	}
 
+	if !prop.SmsEnabled {
+		return types.SendResp{}, fmt.Errorf("sms is disabled for this property")
+	}
+
+	plan, err := h.FB.GetUserPlan(ctx, prop.OwnerID)
+	if err != nil {
+		return types.SendResp{}, fmt.Errorf("cannot verify owner plan: %w", err)
+	}
+	if plan != "pro" {
+		return types.SendResp{}, fmt.Errorf("owner plan is %s (pro required)", plan)
+	}
+
 	msg := fmt.Sprintf("Dear %s,\nThank you! Payment of %d BDT for %s at %s received.\nReceipt: %s/%s\nHave a great month!",
 		renter.Name, inv.TotalAmount, inv.MonthYear, prop.Name, types.InvoiceBaseURL, inv.ID)
 

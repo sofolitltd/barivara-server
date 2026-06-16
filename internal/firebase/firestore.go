@@ -31,11 +31,18 @@ type Renter struct {
 	IsActive   bool   `firestore:"isActive" json:"isActive"`
 }
 
+type User struct {
+	UID  string `firestore:"uid" json:"uid"`
+	Plan string `firestore:"plan" json:"plan"`
+}
+
 type Property struct {
-	ID          string `firestore:"-" json:"id"`
-	Name        string `firestore:"name" json:"name"`
-	OwnerID     string `firestore:"ownerId" json:"ownerId"`
-	ReminderDay int    `firestore:"reminderDay" json:"reminderDay"`
+	ID           string `firestore:"-" json:"id"`
+	Name         string `firestore:"name" json:"name"`
+	OwnerID      string `firestore:"ownerId" json:"ownerId"`
+	ReminderDay  int    `firestore:"reminderDay" json:"reminderDay"`
+	ReminderHour int    `firestore:"reminderHour" json:"reminderHour"`
+	SmsEnabled   bool   `firestore:"smsEnabled" json:"smsEnabled"`
 }
 
 type Client struct {
@@ -166,6 +173,18 @@ func (c *Client) QueryActiveRentersByProperty(ctx context.Context, propertyID st
 		renters = append(renters, r)
 	}
 	return renters, nil
+}
+
+func (c *Client) GetUserPlan(ctx context.Context, uid string) (string, error) {
+	doc, err := c.firestore.Collection("users").Doc(uid).Get(ctx)
+	if err != nil {
+		return "", fmt.Errorf("get user: %w", err)
+	}
+	var u User
+	if err := doc.DataTo(&u); err != nil {
+		return "", fmt.Errorf("parse user: %w", err)
+	}
+	return u.Plan, nil
 }
 
 func (c *Client) QueryUnpaidInvoicesByRenter(ctx context.Context, renterID string) ([]Invoice, error) {
