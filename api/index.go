@@ -33,6 +33,10 @@ func init() {
 	r := gin.New()
 	r.Use(gin.Recovery())
 
+	r.GET("/", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
 	r.GET("/api/cron/check-reminders", hdl.HandleCronReminders)
 	r.POST("/api/send-reminder", hdl.HandleSendReminder)
 	r.POST("/api/send-receipt", hdl.HandleSendReceipt)
