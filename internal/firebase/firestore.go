@@ -184,6 +184,9 @@ func (c *Client) GetUserPlan(ctx context.Context, uid string) (string, error) {
 	if err := doc.DataTo(&u); err != nil {
 		return "", fmt.Errorf("parse user: %w", err)
 	}
+	if u.Plan == "" {
+		return "free", nil
+	}
 	return u.Plan, nil
 }
 
