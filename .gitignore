@@ -2,4 +2,5 @@
 firebase-key.json
 .DS_Store
 *.exe
+/server
 .vercel
