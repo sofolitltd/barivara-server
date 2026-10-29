@@ -1,30 +1,56 @@
 # barivara-server
 
-Rent reminder SMS server for Barivara. Built with Go + Gin. Runs on Vercel.
+Backend API for Barivara. Built with Go + Gin, backed by Postgres (Neon)
+and Neon Object Storage. Runs as a plain long-lived binary — deploy it on
+your own VPS behind a reverse proxy (no serverless platform).
 
 ## Features
 
-- **Auto reminder SMS** — Vercel cron sends rent reminders on the 3rd and 5th of each month
-- **Manual reminder** — Frontend triggers `POST /api/send-reminder` per renter
-- **Payment receipt** — Frontend triggers `POST /api/send-receipt` after payment
+- Phone + password auth (JWT; OTP/refresh is deferred for later)
+- Full CRUD for properties, units, renters, invoices
+- Tenant self-serve linking: a renter record gets a join code, the tenant
+  enters it, the landlord approves (or the landlord links a tenant account
+  directly by email)
+- Presigned upload/download URLs against Neon Object Storage
+- SMS rent reminders / payment receipts (`bulksmsbd.net`)
+- `GET /api/cron/check-reminders` — call this from your own cron (e.g. a
+  system crontab or systemd timer hitting it with `curl`) since there's no
+  platform cron here anymore
 
 ## Setup
 
 ### Prerequisites
 
 - Go 1.21+
-- Firebase project with Firestore (`renters`, `invoices`, `properties`, `sms_logs` collections)
+- A Neon project with Postgres + Object Storage provisioned (`neon link`,
+  see the `neon` CLI) — `DATABASE_URL` and the `AWS_*` object storage
+  credentials are pulled by `neon env pull` into `.env`
 - bulksmsbd.net account with API key
 
 ### Environment
 
-Copy `.env.example` to `.env` and fill in:
+`.env` (gitignored; `neon link`/`neon env pull` write most of this for you):
 
 ```env
 BULKSMSBD_API_KEY=your_api_key
 BULKSMSBD_SENDER_ID=your_sender_id
-FIREBASE_CREDENTIALS={"type":"service_account","project_id":"..."}
+JWT_SECRET=a_long_random_secret
 PORT=8080
+
+# optional — Telegram notification to admin on new landlord requests
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_ADMIN_CHAT_ID=
+
+# optional — FCM push to the Android app (landlord-approval notification)
+FIREBASE_SERVICE_ACCOUNT_JSON=
+
+# from `neon env pull`
+DATABASE_URL=postgres://...
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+AWS_ENDPOINT_URL_S3=...
+AWS_REGION=...
+OBJECT_STORAGE_BUCKET=assets
 ```
 
 ### Run locally
@@ -33,27 +59,29 @@ PORT=8080
 go run cmd/server/main.go
 ```
 
+### Deploy to a VPS
+
+```bash
+go build -o server ./cmd/server
+# copy `server` + `.env` to the VPS, run it behind nginx/caddy,
+# and manage it with systemd (or your process manager of choice).
+```
+
 ## API
 
-### POST /api/send-reminder
+Full route list: `internal/server/routes.go`. Highlights:
 
-Send rent reminder to a renter.
-
-```json
-{"renterId": "abc123", "invoiceId": "inv456"}
-```
-
-### POST /api/send-receipt
-
-Send payment confirmation to a renter.
-
-```json
-{"renterId": "abc123", "invoiceId": "inv456"}
-```
-
-### GET /api/cron/check-reminders
-
-Called daily by Vercel cron. Queries all properties where `reminderDay == today`, then for each property finds active renters with unpaid invoices and sends SMS reminders.
+- `POST /api/auth/signup`, `POST /api/auth/signin`, `GET /api/me`
+- `GET/POST /api/properties`, `.../units`, `.../renters`, `.../invoices`
+- `POST /api/properties/:id/units/:id/renters/:id/join-code` — tenant
+  linking (landlord side)
+- `POST /api/tenant/link-requests`, `GET /api/tenant/renter`,
+  `GET /api/tenant/invoices` — tenant linking (tenant side)
+- `POST /api/uploads/presign`, `GET /api/uploads/resolve`
+- `POST /api/send-reminder`, `POST /api/send-receipt`,
+  `GET /api/cron/check-reminders`
+- `GET /api/invoices/:invoiceId` — public, unauthenticated invoice link
+  (what the SMS templates below point to)
 
 ## Templates
 
@@ -73,54 +101,23 @@ Receipt: https://barivarabd.web.app/invoice/{invoiceId}
 Have a great month!
 ```
 
-## Deploy to Vercel
-
-```bash
-# Install Vercel CLI
-npm i -g vercel
-
-# Set environment variables
-vercel env add BULKSMSBD_API_KEY
-vercel env add BULKSMSBD_SENDER_ID
-vercel env add FIREBASE_CREDENTIALS
-
-# Deploy
-vercel --prod
-```
-
-## Firestore collections
-
-| Collection | Purpose |
-|-----------|---------|
-| `renters` | Renter info: name, phone, propertyId, isActive |
-| `invoices` | Invoice info: renterId, totalAmount, monthYear, status |
-| `properties` | Property info: name, address |
-| `sms_logs` | Auto-created: log of every SMS sent |
-
 ## Project structure
 
 ```
 barivara-server/
-├── api/
-│   └── index.go            # Vercel serverless entry point
-├── cmd/
-│   └── server/
-│       └── main.go         # Local dev server entry point
+├── cmd/server/main.go       # entrypoint (go run / go build)
 ├── internal/
-│   ├── firebase/
-│   │   └── firestore.go    # Firestore queries + SMS logging
-│   ├── handler/
-│   │   ├── handler.go
-│   │   ├── cron.go
-│   │   ├── reminder.go
-│   │   └── receipt.go
-│   ├── sms/
-│   │   └── sender.go       # bulksmsbd.net HTTP caller
-│   └── types/
-│       └── types.go
-├── vercel.json             # Cron schedule + rewrite config
+│   ├── auth/                # bcrypt + JWT
+│   ├── db/                  # Postgres pool + embedded schema.sql
+│   ├── middleware/          # RequireAuth / RequireRole
+│   ├── models/              # domain structs shared by store + handlers
+│   ├── store/                # all Postgres queries
+│   ├── storage/             # Neon Object Storage (presigned S3 URLs)
+│   ├── handler/              # HTTP handlers (gin)
+│   ├── sms/                  # bulksmsbd.net HTTP caller
+│   ├── server/               # router + wiring
+│   └── types/                # request/response DTOs
 ├── go.mod / go.sum
 ├── .env.example
 └── README.md
 ```
-

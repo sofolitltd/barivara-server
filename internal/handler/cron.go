@@ -8,7 +8,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/sofolitltd/barivara-server/internal/firebase"
+	"github.com/sofolitltd/barivara-server/internal/models"
+	"github.com/sofolitltd/barivara-server/internal/store"
 	"github.com/sofolitltd/barivara-server/internal/types"
 )
 
@@ -16,7 +17,7 @@ func (h *Handler) HandleCronReminders(c *gin.Context) {
 	ctx := c.Request.Context()
 	today := time.Now().Day()
 
-	props, err := h.FB.QueryPropertiesByReminderDay(ctx, today)
+	props, err := h.Store.QueryPropertiesByReminderDay(ctx, today)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -34,7 +35,7 @@ func (h *Handler) HandleCronReminders(c *gin.Context) {
 			continue
 		}
 
-		plan, err := h.FB.GetUserPlan(ctx, prop.OwnerID)
+		plan, err := h.Store.GetUserPlan(ctx, prop.OwnerID)
 		if err != nil {
 			log.Printf("skip property %s: cannot check owner plan: %v", prop.ID, err)
 			resp.Failed++
@@ -45,7 +46,7 @@ func (h *Handler) HandleCronReminders(c *gin.Context) {
 			continue
 		}
 
-		renters, err := h.FB.QueryActiveRentersByProperty(ctx, prop.ID)
+		renters, err := h.Store.ListActiveRentersByProperty(ctx, prop.ID)
 		if err != nil {
 			log.Printf("skip property %s: %v", prop.ID, err)
 			continue
@@ -57,7 +58,7 @@ func (h *Handler) HandleCronReminders(c *gin.Context) {
 				continue
 			}
 
-			invoices, err := h.FB.QueryUnpaidInvoicesByRenter(ctx, renter.ID)
+			invoices, err := h.Store.ListUnpaidInvoicesByRenter(ctx, renter.ID)
 			if err != nil {
 				log.Printf("skip renter %s: %v", renter.ID, err)
 				resp.Failed++
@@ -77,14 +78,14 @@ func (h *Handler) HandleCronReminders(c *gin.Context) {
 
 			if err := h.Sender.SendText(renter.Phone, msg); err != nil {
 				log.Printf("SMS failed for %s: %v", renter.Phone, err)
-				h.FB.LogSMS(ctx, firebase.SMSLog{
+				h.Store.LogSMS(ctx, store.SMSLog{
 					RenterID: renter.ID, Type: "reminder", Phone: renter.Phone,
 					Message: msg, Status: "failed", Error: err.Error(), SentAt: time.Now(),
 				})
 				resp.Failed++
 			} else {
 				resp.Sent++
-				h.FB.LogSMS(ctx, firebase.SMSLog{
+				h.Store.LogSMS(ctx, store.SMSLog{
 					RenterID: renter.ID, Type: "reminder", Phone: renter.Phone,
 					Message: msg, Status: "sent", SentAt: time.Now(),
 				})
@@ -96,7 +97,7 @@ func (h *Handler) HandleCronReminders(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-func buildReminderMsg(name, propName string, invoices []firebase.Invoice, totalDue int) string {
+func buildReminderMsg(name, propName string, invoices []models.Invoice, totalDue int) string {
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("Dear %s,\n", name))
 
