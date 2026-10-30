@@ -15,6 +15,11 @@ type SignInReq struct {
 	Password string `json:"password" binding:"required"`
 }
 
+type ChangePasswordReq struct {
+	CurrentPassword string `json:"currentPassword" binding:"required"`
+	NewPassword     string `json:"newPassword" binding:"required,min=6"`
+}
+
 type AuthResp struct {
 	Token string      `json:"token"`
 	User  models.User `json:"user"`
@@ -46,6 +51,10 @@ type LinkByCodeReq struct {
 
 type LinkByEmailReq struct {
 	Email string `json:"email" binding:"required"`
+}
+
+type LinkByPhoneReq struct {
+	Phone string `json:"phone" binding:"required"`
 }
 
 type RecordPaymentReq struct {

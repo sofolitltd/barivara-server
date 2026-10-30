@@ -46,13 +46,12 @@ func (h *Handler) sendReminder(ctx context.Context, renterID, invoiceID string) 
 	if !prop.SmsEnabled {
 		return types.SendResp{}, fmt.Errorf("sms is disabled for this property")
 	}
-
-	plan, err := h.Store.GetUserPlan(ctx, prop.OwnerID)
-	if err != nil {
-		return types.SendResp{}, fmt.Errorf("cannot verify owner plan: %w", err)
+	if h.Sender == nil {
+		return types.SendResp{}, fmt.Errorf("sms service is not configured")
 	}
-	if plan != "pro" {
-		return types.SendResp{}, fmt.Errorf("owner plan is %s (pro required)", plan)
+
+	if err := h.Store.ConsumeSMS(ctx, prop.OwnerID); err != nil {
+		return types.SendResp{}, err
 	}
 
 	msg := fmt.Sprintf("Dear %s,\nYour rent of %d BDT for %s at %s is due.\nView invoice: %s/%s\nPlease pay on time. Thank you.",

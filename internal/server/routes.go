@@ -29,6 +29,7 @@ func newRouter(h *handler.Handler) *gin.Engine {
 	r.GET("/api/rent-posts", h.HandleListActiveRentPosts)
 	r.GET("/api/rent-posts/:postId", h.HandleGetRentPost)
 	r.GET("/api/units/:unitId/rent-post", h.HandleGetRentPostForUnit)
+	r.GET("/api/sms/packages", h.HandleListSMSPackages)
 
 	r.POST("/api/send-reminder", h.HandleSendReminder)
 	r.POST("/api/send-receipt", h.HandleSendReceipt)
@@ -39,20 +40,29 @@ func newRouter(h *handler.Handler) *gin.Engine {
 	// --- Authenticated, any role ---
 	authed := r.Group("/api", auth)
 	authed.GET("/me", h.HandleMe)
+	authed.PUT("/me", h.HandleUpdateProfile)
+	authed.PUT("/me/password", h.HandleChangePassword)
 	authed.POST("/auth/refresh", h.HandleRefreshToken)
 	authed.POST("/users/fcm-token", h.HandleSaveFcmToken)
 	authed.POST("/uploads/presign", h.HandleUploadPresign)
 	authed.POST("/landlord-requests", h.HandleSubmitLandlordRequest)
+	landlordWallet := r.Group("/api", auth, middleware.RequireRole("landlord"))
+	landlordWallet.GET("/sms/wallet", h.HandleSMSWallet)
+	landlordWallet.POST("/sms/purchases", h.HandleRequestSMSPackage)
 
 	// --- Landlord ---
 	landlord := r.Group("/api", auth, middleware.RequireRole("landlord"))
 	landlord.POST("/properties", h.HandleCreateProperty)
 	landlord.GET("/properties", h.HandleListProperties)
 	landlord.GET("/properties/:propertyId", h.HandleGetProperty)
+	landlord.GET("/properties/:propertyId/notices", h.HandleListPropertyNotices)
+	landlord.POST("/properties/:propertyId/notices", h.HandleCreateNotice)
 	landlord.PUT("/properties/:propertyId", h.HandleUpdateProperty)
 	landlord.DELETE("/properties/:propertyId", h.HandleDeleteProperty)
 	landlord.GET("/unpaid-invoices", h.HandleListUnpaidInvoicesForOwner)
 	landlord.GET("/renters/:renterId", h.HandleGetRenterByID)
+	landlord.POST("/renters/:renterId/conversation", h.HandleGetOrCreateConversation)
+	landlord.GET("/conversations", h.HandleListLandlordConversations)
 
 	landlord.POST("/properties/:propertyId/units", h.HandleCreateUnit)
 	landlord.GET("/properties/:propertyId/units", h.HandleListUnits)
@@ -66,6 +76,7 @@ func newRouter(h *handler.Handler) *gin.Engine {
 	units.GET("/renters/history", h.HandleListRenterHistory)
 	units.GET("/renters/:renterId", h.HandleGetRenter)
 	units.PUT("/renters/:renterId", h.HandleUpdateRenter)
+	units.POST("/renters/:renterId/schedule-rent", h.HandleScheduleRentChange)
 	units.POST("/renters/:renterId/vacate", h.HandleVacateRenter)
 	units.POST("/renters/:renterId/restore", h.HandleRestoreRenter)
 	units.DELETE("/renters/:renterId", h.HandleDeleteRenter)
@@ -75,6 +86,7 @@ func newRouter(h *handler.Handler) *gin.Engine {
 	units.POST("/renters/:renterId/link-requests/:requestId/approve", h.HandleApproveLinkRequest)
 	units.POST("/renters/:renterId/link-requests/:requestId/reject", h.HandleRejectLinkRequest)
 	units.POST("/renters/:renterId/link-by-email", h.HandleLinkTenantByEmail)
+	units.POST("/renters/:renterId/link-by-phone", h.HandleLinkTenantByPhone)
 	units.POST("/renters/:renterId/unlink", h.HandleUnlinkTenant)
 
 	units.GET("/invoices", h.HandleListInvoicesByUnit)
@@ -101,17 +113,32 @@ func newRouter(h *handler.Handler) *gin.Engine {
 	tenant.POST("/link-requests", h.HandleRequestLinkByCode)
 	tenant.GET("/link-requests/pending", h.HandleMyPendingLinkRequest)
 	tenant.GET("/renter", h.HandleMyLinkedRenter)
+	tenant.GET("/property", h.HandleMyProperty)
+	tenant.GET("/unit", h.HandleMyUnit)
 	tenant.GET("/invoices", h.HandleMyInvoices)
+	tenant.GET("/conversation", h.HandleGetTenantConversation)
+	tenant.GET("/notices", h.HandleListTenantNotices)
+	tenant.POST("/notices/:noticeId/read", h.HandleMarkTenantNoticeRead)
+
+	authed.GET("/conversations/:conversationId/messages", h.HandleListConversationMessages)
+	authed.POST("/conversations/:conversationId/messages", h.HandleSendConversationMessage)
 
 	// --- Admin ---
 	admin := r.Group("/api/admin", auth, middleware.RequireRole("admin"))
 	admin.GET("/stats", h.HandleAdminStats)
+	admin.GET("/sms/balance", h.HandleAdminSMSBalance)
 	admin.GET("/landlords", h.HandleListLandlords)
 	admin.GET("/landlord-requests", h.HandleListPendingLandlordRequests)
 	admin.GET("/landlord-requests/all", h.HandleListAllLandlordRequests)
 	admin.POST("/landlord-requests/:requestId/approve", h.HandleApproveLandlordRequest)
 	admin.POST("/landlord-requests/:requestId/reject", h.HandleRejectLandlordRequest)
 	admin.POST("/users/:userId/plan", h.HandleSetUserPlan)
+	admin.GET("/sms/packages", h.HandleAdminListSMSPackages)
+	admin.POST("/sms/packages", h.HandleAdminCreateSMSPackage)
+	admin.PUT("/sms/packages/:packageId", h.HandleAdminUpdateSMSPackage)
+	admin.DELETE("/sms/packages/:packageId", h.HandleAdminDeleteSMSPackage)
+	admin.GET("/sms/purchases", h.HandleAdminListSMSPurchases)
+	admin.POST("/sms/purchases/:requestId/:status", h.HandleAdminProcessSMSPurchase)
 
 	return r
 }

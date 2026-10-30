@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -37,16 +38,20 @@ func (s *Store) CreateUser(ctx context.Context, name, phone, email, passwordHash
 
 func (s *Store) GetUserByPhone(ctx context.Context, phone string) (*UserWithPassword, error) {
 	row := s.Pool.QueryRow(ctx, `
-		SELECT id, name, phone, coalesce(email, ''), role, status, plan, photo_url, created_at, password_hash
+		SELECT id, name, phone, coalesce(email, ''), role, status, plan, photo_url, contacts, created_at, password_hash
 		FROM users WHERE phone = $1
 	`, phone)
 
 	var u UserWithPassword
-	if err := row.Scan(&u.ID, &u.Name, &u.Phone, &u.Email, &u.Role, &u.Status, &u.Plan, &u.PhotoURL, &u.CreatedAt, &u.PasswordHash); err != nil {
+	var contacts []byte
+	if err := row.Scan(&u.ID, &u.Name, &u.Phone, &u.Email, &u.Role, &u.Status, &u.Plan, &u.PhotoURL, &contacts, &u.CreatedAt, &u.PasswordHash); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("get user by phone: %w", err)
+	}
+	if err := json.Unmarshal(contacts, &u.Contacts); err != nil {
+		return nil, fmt.Errorf("decode user contacts: %w", err)
 	}
 	return &u, nil
 }
@@ -69,17 +74,71 @@ func (s *Store) GetUserByEmail(ctx context.Context, email string) (*models.User,
 
 func (s *Store) GetUserByID(ctx context.Context, id string) (*models.User, error) {
 	row := s.Pool.QueryRow(ctx, `
-		SELECT id, name, phone, coalesce(email, ''), role, status, plan, photo_url, created_at
+		SELECT id, name, phone, coalesce(email, ''), role, status, plan, photo_url, contacts, created_at
 		FROM users WHERE id = $1
 	`, id)
 
 	var u models.User
-	if err := row.Scan(&u.ID, &u.Name, &u.Phone, &u.Email, &u.Role, &u.Status, &u.Plan, &u.PhotoURL, &u.CreatedAt); err != nil {
+	var contacts []byte
+	if err := row.Scan(&u.ID, &u.Name, &u.Phone, &u.Email, &u.Role, &u.Status, &u.Plan, &u.PhotoURL, &contacts, &u.CreatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("get user by id: %w", err)
 	}
+	if err := json.Unmarshal(contacts, &u.Contacts); err != nil {
+		return nil, fmt.Errorf("decode user contacts: %w", err)
+	}
+	return &u, nil
+}
+
+func (s *Store) GetUserPasswordHash(ctx context.Context, id string) (string, error) {
+	var passwordHash string
+	err := s.Pool.QueryRow(ctx, `SELECT password_hash FROM users WHERE id = $1`, id).Scan(&passwordHash)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("get user password hash: %w", err)
+	}
+	return passwordHash, nil
+}
+
+func (s *Store) UpdateUserPassword(ctx context.Context, id, passwordHash string) error {
+	tag, err := s.Pool.Exec(ctx, `UPDATE users SET password_hash = $2 WHERE id = $1`, id, passwordHash)
+	if err != nil {
+		return fmt.Errorf("update user password: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) UpdateUserProfile(ctx context.Context, id, name, phone, email string, contacts []models.Contact) (*models.User, error) {
+	contactsJSON, err := json.Marshal(contacts)
+	if err != nil {
+		return nil, fmt.Errorf("encode user contacts: %w", err)
+	}
+	row := s.Pool.QueryRow(ctx, `
+		UPDATE users
+		SET name = $2, phone = $3, email = NULLIF($4, ''), contacts = $5::jsonb
+		WHERE id = $1
+		RETURNING id, name, phone, coalesce(email, ''), role, status, plan, photo_url, contacts, created_at
+	`, id, name, phone, email, contactsJSON)
+
+	var u models.User
+	var storedContacts []byte
+	if err := row.Scan(&u.ID, &u.Name, &u.Phone, &u.Email, &u.Role, &u.Status, &u.Plan, &u.PhotoURL, &storedContacts, &u.CreatedAt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		if isUniqueViolation(err) {
+			return nil, ErrDuplicate
+		}
+		return nil, fmt.Errorf("update user profile: %w", err)
+	}
+	u.Contacts = contacts
 	return &u, nil
 }
 

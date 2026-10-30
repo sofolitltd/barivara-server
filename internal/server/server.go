@@ -31,10 +31,26 @@ func Run() {
 	if port == "" {
 		port = "8080"
 	}
+
 	log.Printf("Starting server on :%s", port)
 	if err := r.Run(":" + port); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func firebaseServiceAccount() string {
+	if value := os.Getenv("FIREBASE_SERVICE_ACCOUNT_JSON"); value != "" {
+		return value
+	}
+	if path := os.Getenv("FIREBASE_CREDENTIALS_PATH"); path != "" {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			log.Printf("FIREBASE_CREDENTIALS_PATH %q unavailable: %v — FCM push notifications disabled", path, err)
+			return ""
+		}
+		return string(data)
+	}
+	return ""
 }
 
 // build wires the DB pool, object storage client, SMS sender, and JWT
@@ -44,8 +60,9 @@ func build() (*handler.Handler, func()) {
 
 	apiKey := os.Getenv("BULKSMSBD_API_KEY")
 	senderID := os.Getenv("BULKSMSBD_SENDER_ID")
-	if apiKey == "" || senderID == "" {
-		log.Fatal("BULKSMSBD_API_KEY and BULKSMSBD_SENDER_ID must be set")
+	sender := sms.New(apiKey, senderID)
+	if sender == nil {
+		log.Println("BULKSMSBD_API_KEY/BULKSMSBD_SENDER_ID not set — SMS delivery disabled")
 	}
 
 	databaseURL := os.Getenv("DATABASE_URL")
@@ -73,8 +90,6 @@ func build() (*handler.Handler, func()) {
 		log.Fatalf("object storage init failed: %v", err)
 	}
 
-	sender := sms.New(apiKey, senderID)
-
 	// Optional: admin landlord-request notifications. Logs a warning and
 	// no-ops (rather than failing startup) when unset, since this isn't
 	// load-bearing for the app to function.
@@ -85,12 +100,13 @@ func build() (*handler.Handler, func()) {
 
 	// Optional: push notifications to the Android app (e.g. landlord
 	// approval). Logs a warning and no-ops when unset, same as Telegram.
-	pushNotifier, err := push.New(ctx, os.Getenv("FIREBASE_SERVICE_ACCOUNT_JSON"))
+	serviceAccountJSON := firebaseServiceAccount()
+	pushNotifier, err := push.New(ctx, serviceAccountJSON)
 	if err != nil {
 		log.Fatalf("firebase push init failed: %v", err)
 	}
 	if pushNotifier == nil {
-		log.Println("FIREBASE_SERVICE_ACCOUNT_JSON not set — FCM push notifications disabled")
+		log.Println("FIREBASE_SERVICE_ACCOUNT_JSON/FIREBASE_CREDENTIALS_PATH not set — FCM push notifications disabled")
 	}
 
 	st := store.New(pool)

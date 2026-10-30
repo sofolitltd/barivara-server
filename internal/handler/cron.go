@@ -15,7 +15,22 @@ import (
 
 func (h *Handler) HandleCronReminders(c *gin.Context) {
 	ctx := c.Request.Context()
-	today := time.Now().Day()
+	bangladesh, err := time.LoadLocation("Asia/Dhaka")
+	if err != nil {
+		bangladesh = time.FixedZone("Bangladesh", 6*60*60)
+	}
+	now := time.Now().In(bangladesh)
+	today := now.Day()
+
+	if today == 1 {
+		monthYear := now.Format("2006-01")
+		bills, err := h.Store.GenerateMonthlyBills(ctx, monthYear)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		log.Printf("monthly bills: created=%d skipped=%d failed=%d", bills.Created, bills.Skipped, bills.Failed)
+	}
 
 	props, err := h.Store.QueryPropertiesByReminderDay(ctx, today)
 	if err != nil {
@@ -30,19 +45,34 @@ func (h *Handler) HandleCronReminders(c *gin.Context) {
 
 	resp := types.CronResp{}
 	for _, prop := range props {
+		// Bill generation normally runs on the 1st. If that cron was missed,
+		// the property's configured reminder day safely retries current-month
+		// invoices; existing unit/month rows are skipped by the unique index.
+		if today != 1 {
+			bills, err := h.Store.GenerateMonthlyBills(ctx, now.Format("2006-01"), prop.ID)
+			if err != nil {
+				log.Printf("monthly bills retry for property %s: %v", prop.ID, err)
+			} else {
+				log.Printf("monthly bills retry for property %s: created=%d skipped=%d failed=%d", prop.ID, bills.Created, bills.Skipped, bills.Failed)
+			}
+		}
 		if !prop.SmsEnabled {
 			log.Printf("skip property %s: sms disabled", prop.ID)
 			continue
 		}
+		if h.Sender == nil {
+			log.Printf("skip property %s: SMS service is not configured", prop.ID)
+			continue
+		}
 
-		plan, err := h.Store.GetUserPlan(ctx, prop.OwnerID)
+		balance, err := h.Store.SMSBalance(ctx, prop.OwnerID)
 		if err != nil {
 			log.Printf("skip property %s: cannot check owner plan: %v", prop.ID, err)
 			resp.Failed++
 			continue
 		}
-		if plan != "pro" {
-			log.Printf("skip property %s: owner plan is %s (pro required)", prop.ID, plan)
+		if balance <= 0 {
+			log.Printf("skip property %s: SMS balance is empty", prop.ID)
 			continue
 		}
 
@@ -75,6 +105,10 @@ func (h *Handler) HandleCronReminders(c *gin.Context) {
 			}
 
 			msg := buildReminderMsg(renter.Name, prop.Name, invoices, totalDue)
+			if err := h.Store.ConsumeSMS(ctx, prop.OwnerID); err != nil {
+				log.Printf("SMS balance exhausted for %s: %v", prop.OwnerID, err)
+				break
+			}
 
 			if err := h.Sender.SendText(renter.Phone, msg); err != nil {
 				log.Printf("SMS failed for %s: %v", renter.Phone, err)

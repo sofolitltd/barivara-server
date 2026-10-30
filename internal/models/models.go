@@ -7,11 +7,17 @@ type User struct {
 	Name      string    `json:"name"`
 	Phone     string    `json:"phone"`
 	Email     string    `json:"email"`
+	Contacts  []Contact `json:"contacts"`
 	Role      string    `json:"role"` // renter | landlord | admin | pending_landlord | rejected_landlord
 	Status    string    `json:"status"`
 	Plan      string    `json:"plan"`
 	PhotoURL  *string   `json:"photoUrl,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
+}
+
+type Contact struct {
+	Type  string `json:"type"`
+	Value string `json:"value"`
 }
 
 type Property struct {
@@ -79,26 +85,40 @@ type FamilyMember struct {
 	IsEmergencyContact bool             `json:"isEmergencyContact"`
 }
 
+type TenantRentConfig struct {
+	Amount    int       `json:"amount"`
+	StartDate time.Time `json:"startDate"`
+	Reason    *string   `json:"reason,omitempty"`
+}
+
+type TenantDepositConfig struct {
+	Amount    int       `json:"amount"`
+	StartDate time.Time `json:"startDate"`
+	Reason    *string   `json:"reason,omitempty"`
+}
+
 type Renter struct {
-	ID             string           `json:"id"`
-	PropertyID     string           `json:"propertyId"`
-	UnitID         string           `json:"unitId"`
-	Name           string           `json:"name"`
-	Phone          string           `json:"phone"`
-	Nid            string           `json:"nid"`
-	AdvanceDeposit int              `json:"advanceDeposit"`
-	MoveInDate     time.Time        `json:"moveInDate"`
-	Email          *string          `json:"email,omitempty"`
-	Occupation     *string          `json:"occupation,omitempty"`
-	AlternatePhone *string          `json:"alternatePhone,omitempty"`
-	PhotoURL       *string          `json:"photoUrl,omitempty"`
-	MoveOutDate    *time.Time       `json:"moveOutDate,omitempty"`
-	IsActive       bool             `json:"isActive"`
-	FamilyMembers  []FamilyMember   `json:"familyMembers"`
-	Documents      []RenterDocument `json:"documents"`
-	LandlordNotes  *string          `json:"landlordNotes,omitempty"`
-	JoinCode       *string          `json:"joinCode,omitempty"`
-	LinkedUserID   *string          `json:"linkedUserId,omitempty"`
+	ID             string                `json:"id"`
+	PropertyID     string                `json:"propertyId"`
+	UnitID         string                `json:"unitId"`
+	Name           string                `json:"name"`
+	Phone          string                `json:"phone"`
+	Nid            string                `json:"nid"`
+	AdvanceDeposit int                   `json:"advanceDeposit"`
+	MoveInDate     time.Time             `json:"moveInDate"`
+	Email          *string               `json:"email,omitempty"`
+	Occupation     *string               `json:"occupation,omitempty"`
+	AlternatePhone *string               `json:"alternatePhone,omitempty"`
+	PhotoURL       *string               `json:"photoUrl,omitempty"`
+	MoveOutDate    *time.Time            `json:"moveOutDate,omitempty"`
+	IsActive       bool                  `json:"isActive"`
+	FamilyMembers  []FamilyMember        `json:"familyMembers"`
+	Documents      []RenterDocument      `json:"documents"`
+	LandlordNotes  *string               `json:"landlordNotes,omitempty"`
+	JoinCode       *string               `json:"joinCode,omitempty"`
+	LinkedUserID   *string               `json:"linkedUserId,omitempty"`
+	RentHistory    []TenantRentConfig    `json:"rentHistory"`
+	DepositHistory []TenantDepositConfig `json:"depositHistory"`
 }
 
 type Payment struct {
@@ -166,4 +186,67 @@ type TenantLinkRequest struct {
 	TenantPhone  string    `json:"tenantPhone"`
 	Status       string    `json:"status"`
 	CreatedAt    time.Time `json:"createdAt"`
+}
+
+type SMSPackage struct {
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Description  string    `json:"description"`
+	MessageCount int       `json:"messageCount"`
+	Price        int       `json:"price"`
+	IsActive     bool      `json:"isActive"`
+	CreatedAt    time.Time `json:"createdAt"`
+}
+
+type SMSPurchaseRequest struct {
+	ID           string     `json:"id"`
+	LandlordID   string     `json:"landlordId"`
+	PackageID    string     `json:"packageId"`
+	PackageName  string     `json:"packageName"`
+	MessageCount int        `json:"messageCount"`
+	Amount       int        `json:"amount"`
+	Note         string     `json:"note"`
+	Status       string     `json:"status"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	ProcessedAt  *time.Time `json:"processedAt,omitempty"`
+}
+
+type Notice struct {
+	ID             string     `json:"id"`
+	LandlordID     string     `json:"landlordId"`
+	PropertyID     string     `json:"propertyId"`
+	PropertyName   string     `json:"propertyName,omitempty"`
+	Title          string     `json:"title"`
+	Body           string     `json:"body"`
+	Priority       string     `json:"priority"`
+	PublishedAt    time.Time  `json:"publishedAt"`
+	ExpiresAt      *time.Time `json:"expiresAt,omitempty"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	ReadAt         *time.Time `json:"readAt,omitempty"`
+	RecipientCount int        `json:"recipientCount"`
+}
+
+type Conversation struct {
+	ID           string     `json:"id"`
+	LandlordID   string     `json:"landlordId"`
+	RenterID     string     `json:"renterId"`
+	RenterName   string     `json:"renterName,omitempty"`
+	PropertyID   string     `json:"propertyId"`
+	PropertyName string     `json:"propertyName,omitempty"`
+	UnitID       string     `json:"unitId"`
+	UnitNumber   string     `json:"unitNumber,omitempty"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	UpdatedAt    time.Time  `json:"updatedAt"`
+	LastMessage  string     `json:"lastMessage,omitempty"`
+	LastAt       *time.Time `json:"lastAt,omitempty"`
+	UnreadCount  int        `json:"unreadCount"`
+}
+
+type ConversationMessage struct {
+	ID             string     `json:"id"`
+	ConversationID string     `json:"conversationId"`
+	SenderUserID   string     `json:"senderUserId"`
+	Body           string     `json:"body"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	ReadAt         *time.Time `json:"readAt,omitempty"`
 }

@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS users (
 -- Older deployments created `users` before `fcm_token` existed; this
 -- re-applies cleanly against a fresh DB too.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS fcm_token text;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS contacts jsonb NOT NULL DEFAULT '[]'::jsonb;
 
 -- Admin accounts are kept entirely separate from app users (renters/
 -- landlords) — no phone required, email+password login of their own.
@@ -38,7 +39,7 @@ CREATE TABLE IF NOT EXISTS properties (
     address         text NOT NULL,
     reminder_day    int NOT NULL DEFAULT 5,
     reminder_hour   int NOT NULL DEFAULT 8,
-    sms_enabled     boolean NOT NULL DEFAULT true,
+    sms_enabled     boolean NOT NULL DEFAULT false,
     google_maps_url text,
     property_type   text,
     image_url       text,
@@ -51,6 +52,19 @@ CREATE INDEX IF NOT EXISTS idx_properties_owner ON properties(owner_id);
 -- Older deployments created `properties` before `image_urls` existed (single
 -- `image_url` only); this re-applies cleanly against a fresh DB too.
 ALTER TABLE properties ADD COLUMN IF NOT EXISTS image_urls jsonb NOT NULL DEFAULT '[]';
+
+CREATE TABLE IF NOT EXISTS notices (
+    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    landlord_id uuid NOT NULL REFERENCES users(id),
+    property_id uuid NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+    title       text NOT NULL,
+    body        text NOT NULL,
+    priority    text NOT NULL DEFAULT 'normal', -- normal | urgent
+    published_at timestamptz NOT NULL DEFAULT now(),
+    expires_at  timestamptz,
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_notices_property ON notices(property_id, published_at DESC);
 
 CREATE TABLE IF NOT EXISTS units (
     id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -93,8 +107,42 @@ CREATE TABLE IF NOT EXISTS renters (
     join_code        text UNIQUE,
     linked_user_id   uuid REFERENCES users(id)
 );
+ALTER TABLE renters ADD COLUMN IF NOT EXISTS rent_history jsonb NOT NULL DEFAULT '[]';
+ALTER TABLE renters ADD COLUMN IF NOT EXISTS deposit_history jsonb NOT NULL DEFAULT '[]';
 CREATE INDEX IF NOT EXISTS idx_renters_property_unit ON renters(property_id, unit_id);
 CREATE INDEX IF NOT EXISTS idx_renters_linked_user ON renters(linked_user_id);
+
+CREATE TABLE IF NOT EXISTS notice_recipients (
+    notice_id uuid NOT NULL REFERENCES notices(id) ON DELETE CASCADE,
+    renter_id uuid NOT NULL REFERENCES renters(id) ON DELETE CASCADE,
+    tenant_user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    read_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (notice_id, tenant_user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_notice_recipients_user ON notice_recipients(tenant_user_id, read_at);
+
+CREATE TABLE IF NOT EXISTS conversations (
+    id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    landlord_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    renter_id   uuid NOT NULL REFERENCES renters(id) ON DELETE CASCADE,
+    property_id uuid NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+    unit_id     uuid NOT NULL REFERENCES units(id) ON DELETE CASCADE,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    updated_at  timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (landlord_id, renter_id)
+);
+
+CREATE TABLE IF NOT EXISTS conversation_messages (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    conversation_id uuid NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    sender_user_id  uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    body            text NOT NULL,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    read_at         timestamptz
+);
+CREATE INDEX IF NOT EXISTS idx_conversation_messages
+    ON conversation_messages(conversation_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS invoices (
     id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -115,6 +163,7 @@ CREATE TABLE IF NOT EXISTS invoices (
 );
 CREATE INDEX IF NOT EXISTS idx_invoices_property_unit ON invoices(property_id, unit_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_renter ON invoices(renter_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_unit_month ON invoices(unit_id, month_year);
 
 CREATE TABLE IF NOT EXISTS landlord_requests (
     id                     uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -171,6 +220,35 @@ CREATE TABLE IF NOT EXISTS sms_logs (
     status      text NOT NULL, -- sent | failed
     error       text,
     sent_at     timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS sms_packages (
+    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    name        text NOT NULL,
+    description text NOT NULL DEFAULT '',
+    message_count int NOT NULL CHECK (message_count > 0),
+    price       int NOT NULL CHECK (price >= 0),
+    is_active   boolean NOT NULL DEFAULT true,
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS sms_wallets (
+    landlord_id uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    balance     int NOT NULL DEFAULT 0 CHECK (balance >= 0),
+    updated_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS sms_purchase_requests (
+    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    landlord_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    package_id  uuid NOT NULL REFERENCES sms_packages(id),
+    package_name text NOT NULL,
+    message_count int NOT NULL,
+    amount      int NOT NULL,
+    note        text NOT NULL DEFAULT '',
+    status      text NOT NULL DEFAULT 'pending', -- pending | approved | rejected
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    processed_at timestamptz
 );
 
 CREATE TABLE IF NOT EXISTS counters (

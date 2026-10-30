@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/sofolitltd/barivara-server/internal/models"
@@ -12,15 +14,16 @@ import (
 
 const renterCols = `id, property_id, unit_id, name, phone, nid, advance_deposit, move_in_date, email,
 	occupation, alternate_phone, photo_url, move_out_date, is_active, family_members, documents,
-	landlord_notes, join_code, linked_user_id`
+	landlord_notes, join_code, linked_user_id, rent_history, deposit_history`
 
 func scanRenter(row pgx.Row) (*models.Renter, error) {
 	var r models.Renter
-	var familyMembers, documents []byte
+	var familyMembers, documents, rentHistory, depositHistory []byte
 
 	if err := row.Scan(&r.ID, &r.PropertyID, &r.UnitID, &r.Name, &r.Phone, &r.Nid, &r.AdvanceDeposit,
 		&r.MoveInDate, &r.Email, &r.Occupation, &r.AlternatePhone, &r.PhotoURL, &r.MoveOutDate,
-		&r.IsActive, &familyMembers, &documents, &r.LandlordNotes, &r.JoinCode, &r.LinkedUserID); err != nil {
+		&r.IsActive, &familyMembers, &documents, &r.LandlordNotes, &r.JoinCode, &r.LinkedUserID,
+		&rentHistory, &depositHistory); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -31,6 +34,14 @@ func scanRenter(row pgx.Row) (*models.Renter, error) {
 	r.Documents = []models.RenterDocument{}
 	_ = json.Unmarshal(familyMembers, &r.FamilyMembers)
 	_ = json.Unmarshal(documents, &r.Documents)
+	_ = json.Unmarshal(rentHistory, &r.RentHistory)
+	_ = json.Unmarshal(depositHistory, &r.DepositHistory)
+	if r.RentHistory == nil {
+		r.RentHistory = []models.TenantRentConfig{}
+	}
+	if r.DepositHistory == nil {
+		r.DepositHistory = []models.TenantDepositConfig{}
+	}
 	return &r, nil
 }
 
@@ -41,17 +52,36 @@ func normalizeRenter(r *models.Renter) {
 	if r.Documents == nil {
 		r.Documents = []models.RenterDocument{}
 	}
+	if r.RentHistory == nil {
+		r.RentHistory = []models.TenantRentConfig{}
+	}
+	if r.DepositHistory == nil {
+		r.DepositHistory = []models.TenantDepositConfig{}
+	}
 }
 
 func (s *Store) CreateRenter(ctx context.Context, r models.Renter) (*models.Renter, error) {
 	normalizeRenter(&r)
+	var unitRent int
+	var unitDeposit *int
+	if err := s.Pool.QueryRow(ctx, `SELECT base_rent, security_deposit FROM units WHERE id=$1`, r.UnitID).Scan(&unitRent, &unitDeposit); err != nil {
+		return nil, fmt.Errorf("load unit rental terms: %w", err)
+	}
+	if len(r.RentHistory) == 0 {
+		r.RentHistory = []models.TenantRentConfig{{Amount: unitRent, StartDate: r.MoveInDate}}
+	}
+	if len(r.DepositHistory) == 0 && unitDeposit != nil {
+		r.DepositHistory = []models.TenantDepositConfig{{Amount: *unitDeposit, StartDate: r.MoveInDate}}
+	}
 	row := s.Pool.QueryRow(ctx, `
 		INSERT INTO renters (property_id, unit_id, name, phone, nid, advance_deposit, move_in_date, email,
-			occupation, alternate_phone, photo_url, is_active, family_members, documents, landlord_notes)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,true,$12,$13,$14)
+			occupation, alternate_phone, photo_url, is_active, family_members, documents, landlord_notes,
+			rent_history, deposit_history)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,true,$12,$13,$14,$15,$16)
 		RETURNING `+renterCols,
 		r.PropertyID, r.UnitID, r.Name, r.Phone, r.Nid, r.AdvanceDeposit, r.MoveInDate, r.Email,
-		r.Occupation, r.AlternatePhone, r.PhotoURL, toJSON(r.FamilyMembers), toJSON(r.Documents), r.LandlordNotes)
+		r.Occupation, r.AlternatePhone, r.PhotoURL, toJSON(r.FamilyMembers), toJSON(r.Documents), r.LandlordNotes,
+		toJSON(r.RentHistory), toJSON(r.DepositHistory))
 	renter, err := scanRenter(row)
 	if err != nil {
 		return nil, err
@@ -112,11 +142,32 @@ func (s *Store) UpdateRenter(ctx context.Context, r models.Renter) (*models.Rent
 	row := s.Pool.QueryRow(ctx, `
 		UPDATE renters SET name=$2, phone=$3, nid=$4, advance_deposit=$5, move_in_date=$6, email=$7,
 			occupation=$8, alternate_phone=$9, photo_url=$10, move_out_date=$11, is_active=$12,
-			family_members=$13, documents=$14, landlord_notes=$15
+			family_members=$13, documents=$14, landlord_notes=$15, rent_history=$16, deposit_history=$17
 		WHERE id = $1
 		RETURNING `+renterCols,
 		r.ID, r.Name, r.Phone, r.Nid, r.AdvanceDeposit, r.MoveInDate, r.Email, r.Occupation,
-		r.AlternatePhone, r.PhotoURL, r.MoveOutDate, r.IsActive, toJSON(r.FamilyMembers), toJSON(r.Documents), r.LandlordNotes)
+		r.AlternatePhone, r.PhotoURL, r.MoveOutDate, r.IsActive, toJSON(r.FamilyMembers), toJSON(r.Documents),
+		r.LandlordNotes, toJSON(r.RentHistory), toJSON(r.DepositHistory))
+	return scanRenter(row)
+}
+
+func (s *Store) ScheduleRentChange(ctx context.Context, renterID string, amount int, startDate time.Time, reason *string) (*models.Renter, error) {
+	renter, err := s.GetRenter(ctx, renterID)
+	if err != nil {
+		return nil, err
+	}
+	if amount <= 0 {
+		return nil, fmt.Errorf("rent amount must be greater than zero")
+	}
+	renter.RentHistory = append(renter.RentHistory, models.TenantRentConfig{
+		Amount: amount, StartDate: startDate, Reason: reason,
+	})
+	sort.Slice(renter.RentHistory, func(i, j int) bool {
+		return renter.RentHistory[i].StartDate.Before(renter.RentHistory[j].StartDate)
+	})
+	row := s.Pool.QueryRow(ctx, `
+		UPDATE renters SET rent_history=$2 WHERE id=$1 RETURNING `+renterCols,
+		renterID, toJSON(renter.RentHistory))
 	return scanRenter(row)
 }
 

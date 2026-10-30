@@ -43,6 +43,7 @@ TELEGRAM_ADMIN_CHAT_ID=
 
 # optional — FCM push to the Android app (landlord-approval notification)
 FIREBASE_SERVICE_ACCOUNT_JSON=
+# or use FIREBASE_CREDENTIALS_PATH=/absolute/path/to/firebase-key.json
 
 # from `neon env pull`
 DATABASE_URL=postgres://...

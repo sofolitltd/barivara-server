@@ -99,6 +99,28 @@ func (h *Handler) HandleUpdateRenter(c *gin.Context) {
 	c.JSON(http.StatusOK, updated)
 }
 
+func (h *Handler) HandleScheduleRentChange(c *gin.Context) {
+	if _, ok := h.ownsProperty(c, c.Param("propertyId")); !ok {
+		return
+	}
+	var req struct {
+		Amount    int       `json:"amount" binding:"required"`
+		StartDate time.Time `json:"startDate" binding:"required"`
+		Reason    *string   `json:"reason"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, types.ErrorResp{Error: err.Error()})
+		return
+	}
+	renterID := c.Param("renterId")
+	updated, err := h.Store.ScheduleRentChange(c.Request.Context(), renterID, req.Amount, req.StartDate, req.Reason)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, types.ErrorResp{Error: err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, updated)
+}
+
 func (h *Handler) HandleVacateRenter(c *gin.Context) {
 	if _, ok := h.ownsProperty(c, c.Param("propertyId")); !ok {
 		return

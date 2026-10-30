@@ -113,6 +113,37 @@ func (h *Handler) HandleLinkTenantByEmail(c *gin.Context) {
 	c.JSON(http.StatusOK, tenant)
 }
 
+func (h *Handler) HandleLinkTenantByPhone(c *gin.Context) {
+	if _, ok := h.ownsProperty(c, c.Param("propertyId")); !ok {
+		return
+	}
+	var req types.LinkByPhoneReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, types.ErrorResp{Error: err.Error()})
+		return
+	}
+
+	user, err := h.Store.GetUserByPhone(c.Request.Context(), strings.TrimSpace(req.Phone))
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			c.JSON(http.StatusNotFound, types.ErrorResp{Error: "এই মোবাইল নম্বরে কোনো অ্যাকাউন্ট পাওয়া যায়নি"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, types.ErrorResp{Error: err.Error()})
+		return
+	}
+	if user.Role != "renter" {
+		c.JSON(http.StatusBadRequest, types.ErrorResp{Error: "এই অ্যাকাউন্টটি ভাড়াটিয়া অ্যাকাউন্ট নয়"})
+		return
+	}
+
+	if err := h.Store.LinkRenterToUser(c.Request.Context(), c.Param("renterId"), user.ID); err != nil {
+		c.JSON(http.StatusInternalServerError, types.ErrorResp{Error: err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, user.User)
+}
+
 func (h *Handler) HandleUnlinkTenant(c *gin.Context) {
 	if _, ok := h.ownsProperty(c, c.Param("propertyId")); !ok {
 		return
@@ -180,6 +211,42 @@ func (h *Handler) HandleMyLinkedRenter(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, renter)
+}
+
+func (h *Handler) HandleMyProperty(c *gin.Context) {
+	renter, err := h.Store.GetLinkedRenter(c.Request.Context(), middleware.UserID(c))
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			c.JSON(http.StatusOK, nil)
+			return
+		}
+		c.JSON(http.StatusInternalServerError, types.ErrorResp{Error: err.Error()})
+		return
+	}
+	property, err := h.Store.GetProperty(c.Request.Context(), renter.PropertyID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, types.ErrorResp{Error: "property not found"})
+		return
+	}
+	c.JSON(http.StatusOK, property)
+}
+
+func (h *Handler) HandleMyUnit(c *gin.Context) {
+	renter, err := h.Store.GetLinkedRenter(c.Request.Context(), middleware.UserID(c))
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			c.JSON(http.StatusOK, nil)
+			return
+		}
+		c.JSON(http.StatusInternalServerError, types.ErrorResp{Error: err.Error()})
+		return
+	}
+	unit, err := h.Store.GetUnit(c.Request.Context(), renter.UnitID)
+	if err != nil || unit.PropertyID != renter.PropertyID {
+		c.JSON(http.StatusNotFound, types.ErrorResp{Error: "unit not found"})
+		return
+	}
+	c.JSON(http.StatusOK, unit)
 }
 
 func (h *Handler) HandleMyInvoices(c *gin.Context) {

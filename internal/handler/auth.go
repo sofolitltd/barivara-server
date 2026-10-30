@@ -3,10 +3,12 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sofolitltd/barivara-server/internal/auth"
 	"github.com/sofolitltd/barivara-server/internal/middleware"
+	"github.com/sofolitltd/barivara-server/internal/models"
 	"github.com/sofolitltd/barivara-server/internal/store"
 	"github.com/sofolitltd/barivara-server/internal/types"
 )
@@ -99,6 +101,74 @@ func (h *Handler) HandleMe(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, user)
+}
+
+type UpdateProfileReq struct {
+	Name     string           `json:"name"`
+	Phone    string           `json:"phone"`
+	Email    string           `json:"email"`
+	Contacts []models.Contact `json:"contacts"`
+}
+
+func (h *Handler) HandleUpdateProfile(c *gin.Context) {
+	var req UpdateProfileReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, types.ErrorResp{Error: "সঠিক তথ্য পাঠান"})
+		return
+	}
+
+	req.Name = strings.TrimSpace(req.Name)
+	req.Phone = strings.TrimSpace(req.Phone)
+	req.Email = strings.TrimSpace(req.Email)
+	if req.Name == "" || req.Phone == "" {
+		c.JSON(http.StatusBadRequest, types.ErrorResp{Error: "নাম ও মোবাইল নম্বর প্রয়োজন"})
+		return
+	}
+
+	user, err := h.Store.UpdateUserProfile(c.Request.Context(), middleware.UserID(c), req.Name, req.Phone, req.Email, req.Contacts)
+	if err != nil {
+		if errors.Is(err, store.ErrDuplicate) {
+			c.JSON(http.StatusConflict, types.ErrorResp{Error: "এই মোবাইল বা ইমেইলটি অন্য অ্যাকাউন্টে ব্যবহৃত হচ্ছে"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, types.ErrorResp{Error: "প্রোফাইল আপডেট করা যায়নি"})
+		return
+	}
+	c.JSON(http.StatusOK, user)
+}
+
+func (h *Handler) HandleChangePassword(c *gin.Context) {
+	var req types.ChangePasswordReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, types.ErrorResp{Error: "বর্তমান ও নতুন পাসওয়ার্ড লিখুন (নতুনটি অন্তত ৬ অক্ষরের)"})
+		return
+	}
+
+	passwordHash, err := h.Store.GetUserPasswordHash(c.Request.Context(), middleware.UserID(c))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, types.ErrorResp{Error: "পাসওয়ার্ড যাচাই করা যায়নি"})
+		return
+	}
+	if !auth.CheckPassword(passwordHash, req.CurrentPassword) {
+		c.JSON(http.StatusUnauthorized, types.ErrorResp{Error: "বর্তমান পাসওয়ার্ড ভুল"})
+		return
+	}
+	if req.CurrentPassword == req.NewPassword {
+		c.JSON(http.StatusBadRequest, types.ErrorResp{Error: "নতুন পাসওয়ার্ড বর্তমান পাসওয়ার্ড থেকে আলাদা হতে হবে"})
+		return
+	}
+
+	newPasswordHash, err := auth.HashPassword(req.NewPassword)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, types.ErrorResp{Error: "পাসওয়ার্ড পরিবর্তন করা যায়নি"})
+		return
+	}
+	if err := h.Store.UpdateUserPassword(c.Request.Context(), middleware.UserID(c), newPasswordHash); err != nil {
+		c.JSON(http.StatusInternalServerError, types.ErrorResp{Error: "পাসওয়ার্ড পরিবর্তন করা যায়নি"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "পাসওয়ার্ড সফলভাবে পরিবর্তন হয়েছে"})
 }
 
 // HandleRefreshToken re-issues a JWT off the user's *current* DB role —
