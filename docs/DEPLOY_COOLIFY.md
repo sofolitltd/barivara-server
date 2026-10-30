@@ -33,7 +33,9 @@ release is not built in Coolify, so passing secrets such as
 parsing. Keep all runtime secrets in Coolify's environment settings instead;
 the running binary receives them at runtime.
 
-Use `/health` as the Coolify health-check path.
+Use `/health` as the Coolify HTTP health-check path. Do not define a
+Dockerfile `HEALTHCHECK` for the pre-built binary; Coolify should own the
+HTTP readiness check and port routing.
 
 Required environment variables include `DATABASE_URL`, `JWT_SECRET`,
 `PORT`, and the optional SMS, Telegram, Firebase, and object-storage values.
