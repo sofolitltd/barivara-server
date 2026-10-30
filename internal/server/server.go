@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"log"
 	"net/http"
 	"os"
@@ -39,6 +40,14 @@ func Run() {
 }
 
 func firebaseServiceAccount() string {
+	if encoded := os.Getenv("FIREBASE_SERVICE_ACCOUNT_BASE64"); encoded != "" {
+		data, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			log.Printf("FIREBASE_SERVICE_ACCOUNT_BASE64 is invalid: %v — FCM push notifications disabled", err)
+			return ""
+		}
+		return string(data)
+	}
 	if value := os.Getenv("FIREBASE_SERVICE_ACCOUNT_JSON"); value != "" {
 		return value
 	}
