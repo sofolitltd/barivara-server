@@ -68,6 +68,22 @@ go build -o server ./cmd/server
 # and manage it with systemd (or your process manager of choice).
 ```
 
+### Deploy to Coolify
+
+The deployment follows the same pre-built binary workflow as the other Go
+services:
+
+```bash
+make build
+git add barivara-server
+git commit -m "build: deploy"
+git push origin main
+```
+
+In Coolify, select the `main` branch, use **Build method: None**, set the
+start command to `./barivara-server`, and expose port `8080`. Configure the
+same environment variables described above in the Coolify dashboard.
+
 ## API
 
 Full route list: `internal/server/routes.go`. Highlights:
