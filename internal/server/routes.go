@@ -19,6 +19,9 @@ func newRouter(h *handler.Handler) *gin.Engine {
 	r.GET("/", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "healthy"})
+	})
 
 	// --- Public ---
 	r.POST("/api/auth/signup", h.HandleSignUp)

@@ -27,5 +27,13 @@ The binary is intentionally tracked in Git. Do not add it to `.gitignore`.
 | Port | `8080` |
 | Environment variables | Configure in the Coolify dashboard |
 
+Do not select Dockerfile or a Docker build pack for this deployment. A binary
+release is not built in Coolify, so passing secrets such as
+`FIREBASE_SERVICE_ACCOUNT_JSON` through Docker build arguments can break JSON
+parsing. Keep all runtime secrets in Coolify's environment settings instead;
+the running binary receives them at runtime.
+
+Use `/health` as the Coolify health-check path.
+
 Required environment variables include `DATABASE_URL`, `JWT_SECRET`,
 `PORT`, and the optional SMS, Telegram, Firebase, and object-storage values.
