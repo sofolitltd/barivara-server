@@ -46,6 +46,9 @@ func (h *Handler) sendReceipt(ctx context.Context, renterID, invoiceID string) (
 	if !prop.SmsEnabled {
 		return types.SendResp{}, fmt.Errorf("sms is disabled for this property")
 	}
+	if !renter.SmsEnabled {
+		return types.SendResp{}, fmt.Errorf("sms is disabled for this renter")
+	}
 	if h.Sender == nil {
 		return types.SendResp{}, fmt.Errorf("sms service is not configured")
 	}

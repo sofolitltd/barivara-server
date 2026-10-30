@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS renters (
     photo_url        text,
     move_out_date    date,
     is_active        boolean NOT NULL DEFAULT true,
+    sms_enabled      boolean NOT NULL DEFAULT false,
     family_members   jsonb NOT NULL DEFAULT '[]',
     documents        jsonb NOT NULL DEFAULT '[]',
     landlord_notes   text,
@@ -109,6 +110,7 @@ CREATE TABLE IF NOT EXISTS renters (
 );
 ALTER TABLE renters ADD COLUMN IF NOT EXISTS rent_history jsonb NOT NULL DEFAULT '[]';
 ALTER TABLE renters ADD COLUMN IF NOT EXISTS deposit_history jsonb NOT NULL DEFAULT '[]';
+ALTER TABLE renters ADD COLUMN IF NOT EXISTS sms_enabled boolean NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS idx_renters_property_unit ON renters(property_id, unit_id);
 CREATE INDEX IF NOT EXISTS idx_renters_linked_user ON renters(linked_user_id);
 
@@ -132,6 +134,14 @@ CREATE TABLE IF NOT EXISTS conversations (
     updated_at  timestamptz NOT NULL DEFAULT now(),
     UNIQUE (landlord_id, renter_id)
 );
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS conversation_type text NOT NULL DEFAULT 'landlord';
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS participant_a_user_id uuid REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS participant_b_user_id uuid REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS request_sender_user_id uuid REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'accepted';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_conversation_pair
+    ON conversations(property_id, participant_a_user_id, participant_b_user_id)
+    WHERE conversation_type = 'tenant';
 
 CREATE TABLE IF NOT EXISTS conversation_messages (
     id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -139,10 +149,21 @@ CREATE TABLE IF NOT EXISTS conversation_messages (
     sender_user_id  uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     body            text NOT NULL,
     created_at      timestamptz NOT NULL DEFAULT now(),
-    read_at         timestamptz
+    read_at         timestamptz,
+    edited_at       timestamptz,
+    deleted_at      timestamptz
 );
+ALTER TABLE conversation_messages ADD COLUMN IF NOT EXISTS edited_at timestamptz;
+ALTER TABLE conversation_messages ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
 CREATE INDEX IF NOT EXISTS idx_conversation_messages
     ON conversation_messages(conversation_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS conversation_message_hidden (
+    message_id uuid NOT NULL REFERENCES conversation_messages(id) ON DELETE CASCADE,
+    user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (message_id, user_id)
+);
 
 CREATE TABLE IF NOT EXISTS invoices (
     id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),

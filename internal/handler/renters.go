@@ -19,6 +19,12 @@ func (h *Handler) HandleCreateRenter(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, types.ErrorResp{Error: err.Error()})
 		return
 	}
+	joinCode, err := randomCode()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, types.ErrorResp{Error: "could not generate join code"})
+		return
+	}
+	r.JoinCode = &joinCode
 	r.PropertyID, r.UnitID = propertyID, unitID
 	created, err := h.Store.CreateRenter(c.Request.Context(), r)
 	if err != nil {

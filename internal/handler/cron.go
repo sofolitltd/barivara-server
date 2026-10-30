@@ -4,11 +4,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/sofolitltd/barivara-server/internal/models"
 	"github.com/sofolitltd/barivara-server/internal/store"
 	"github.com/sofolitltd/barivara-server/internal/types"
 )
@@ -20,131 +18,109 @@ func (h *Handler) HandleCronReminders(c *gin.Context) {
 		bangladesh = time.FixedZone("Bangladesh", 6*60*60)
 	}
 	now := time.Now().In(bangladesh)
-	today := now.Day()
 
-	if today == 1 {
-		monthYear := now.Format("2006-01")
-		bills, err := h.Store.GenerateMonthlyBills(ctx, monthYear)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		log.Printf("monthly bills: created=%d skipped=%d failed=%d", bills.Created, bills.Skipped, bills.Failed)
-	}
-
-	props, err := h.Store.QueryPropertiesByReminderDay(ctx, today)
+	props, err := h.Store.QueryPropertiesByReminderSchedule(ctx, now.Day(), now.Hour())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-
 	if len(props) == 0 {
-		c.JSON(http.StatusOK, types.CronResp{Skipped: true, Reason: "no properties with reminder day today"})
+		c.JSON(http.StatusOK, types.CronResp{
+			Skipped: true, Reason: "no properties due for monthly billing at this time",
+		})
 		return
 	}
 
 	resp := types.CronResp{}
+	monthYear := now.Format("January 2006")
 	for _, prop := range props {
-		// Bill generation normally runs on the 1st. If that cron was missed,
-		// the property's configured reminder day safely retries current-month
-		// invoices; existing unit/month rows are skipped by the unique index.
-		if today != 1 {
-			bills, err := h.Store.GenerateMonthlyBills(ctx, now.Format("2006-01"), prop.ID)
-			if err != nil {
-				log.Printf("monthly bills retry for property %s: %v", prop.ID, err)
-			} else {
-				log.Printf("monthly bills retry for property %s: created=%d skipped=%d failed=%d", prop.ID, bills.Created, bills.Skipped, bills.Failed)
-			}
-		}
-		if !prop.SmsEnabled {
-			log.Printf("skip property %s: sms disabled", prop.ID)
-			continue
-		}
-		if h.Sender == nil {
-			log.Printf("skip property %s: SMS service is not configured", prop.ID)
-			continue
-		}
-
-		balance, err := h.Store.SMSBalance(ctx, prop.OwnerID)
+		bills, err := h.Store.GenerateMonthlyBills(ctx, monthYear, prop.ID)
 		if err != nil {
-			log.Printf("skip property %s: cannot check owner plan: %v", prop.ID, err)
+			log.Printf("monthly bills for property %s: %v", prop.ID, err)
 			resp.Failed++
 			continue
 		}
-		if balance <= 0 {
-			log.Printf("skip property %s: SMS balance is empty", prop.ID)
-			continue
-		}
+		log.Printf("monthly bills for property %s: created=%d skipped=%d failed=%d",
+			prop.ID, bills.Created, bills.Skipped, bills.Failed)
+		resp.Failed += bills.Failed
 
-		renters, err := h.Store.ListActiveRentersByProperty(ctx, prop.ID)
-		if err != nil {
-			log.Printf("skip property %s: %v", prop.ID, err)
-			continue
-		}
+		for _, notice := range bills.Notifications {
+			pushErr := error(nil)
+			if notice.FcmToken != "" {
+				if h.Push == nil {
+					pushErr = fmt.Errorf("FCM push service is not configured")
+				} else {
+					pushErr = h.Push.Send(ctx, notice.FcmToken, "নতুন মাসিক বিল",
+						fmt.Sprintf("%s মাসের ভাড়া বিল ৳%d তৈরি হয়েছে।",
+							notice.MonthYear, notice.TotalAmount),
+						map[string]string{
+							"type":      "invoice_generated",
+							"invoiceId": notice.InvoiceID,
+						})
+				}
+				if pushErr == nil {
+					resp.Sent++
+					continue
+				}
+				log.Printf("invoice push failed for renter %s: %v", notice.RenterID, pushErr)
+			}
 
-		for _, renter := range renters {
-			if renter.Phone == "" {
+			if !shouldSendSMSFallback(notice.FcmToken != "", pushErr, prop.SmsEnabled, notice.SmsEnabled) {
+				if pushErr != nil {
+					resp.Failed++
+				}
+				continue
+			}
+			if notice.Phone == "" {
+				log.Printf("skip invoice SMS for renter %s: phone is empty", notice.RenterID)
 				resp.Failed++
 				continue
 			}
-
-			invoices, err := h.Store.ListUnpaidInvoicesByRenter(ctx, renter.ID)
-			if err != nil {
-				log.Printf("skip renter %s: %v", renter.ID, err)
+			if h.Sender == nil {
+				log.Printf("skip invoice SMS for renter %s: SMS service is not configured", notice.RenterID)
 				resp.Failed++
 				continue
 			}
-
-			if len(invoices) == 0 {
-				continue
-			}
-
-			totalDue := 0
-			for _, inv := range invoices {
-				totalDue += inv.TotalAmount
-			}
-
-			msg := buildReminderMsg(renter.Name, prop.Name, invoices, totalDue)
 			if err := h.Store.ConsumeSMS(ctx, prop.OwnerID); err != nil {
-				log.Printf("SMS balance exhausted for %s: %v", prop.OwnerID, err)
-				break
+				log.Printf("invoice SMS balance unavailable for renter %s: %v", notice.RenterID, err)
+				resp.Failed++
+				continue
 			}
 
-			if err := h.Sender.SendText(renter.Phone, msg); err != nil {
-				log.Printf("SMS failed for %s: %v", renter.Phone, err)
-				h.Store.LogSMS(ctx, store.SMSLog{
-					RenterID: renter.ID, Type: "reminder", Phone: renter.Phone,
-					Message: msg, Status: "failed", Error: err.Error(), SentAt: time.Now(),
-				})
+			message := buildBillNotificationMsg(notice.RenterName, prop.Name,
+				notice.MonthYear, notice.TotalAmount, notice.InvoiceID)
+			if err := h.Sender.SendText(notice.Phone, message); err != nil {
+				log.Printf("invoice SMS failed for renter %s: %v", notice.RenterID, err)
+				if logErr := h.Store.LogSMS(ctx, store.SMSLog{
+					RenterID: notice.RenterID, InvoiceID: notice.InvoiceID, Type: "invoice",
+					Phone: notice.Phone, Message: message, Status: "failed",
+					Error: err.Error(), SentAt: time.Now(),
+				}); logErr != nil {
+					log.Printf("failed to log invoice SMS failure for renter %s: %v", notice.RenterID, logErr)
+				}
 				resp.Failed++
-			} else {
-				resp.Sent++
-				h.Store.LogSMS(ctx, store.SMSLog{
-					RenterID: renter.ID, Type: "reminder", Phone: renter.Phone,
-					Message: msg, Status: "sent", SentAt: time.Now(),
-				})
+				continue
 			}
+			if err := h.Store.LogSMS(ctx, store.SMSLog{
+				RenterID: notice.RenterID, InvoiceID: notice.InvoiceID, Type: "invoice",
+				Phone: notice.Phone, Message: message, Status: "sent", SentAt: time.Now(),
+			}); err != nil {
+				log.Printf("invoice SMS sent to renter %s but failed to save SMS log: %v", notice.RenterID, err)
+			}
+			resp.Sent++
 		}
 	}
 	resp.Total = resp.Sent + resp.Failed
-
 	c.JSON(http.StatusOK, resp)
 }
 
-func buildReminderMsg(name, propName string, invoices []models.Invoice, totalDue int) string {
-	var b strings.Builder
-	b.WriteString(fmt.Sprintf("Dear %s,\n", name))
+func shouldSendSMSFallback(hasPushToken bool, pushErr error, propertySmsEnabled, renterSmsEnabled bool) bool {
+	return propertySmsEnabled && renterSmsEnabled && (!hasPushToken || pushErr != nil)
+}
 
-	if len(invoices) == 1 {
-		inv := invoices[0]
-		b.WriteString(fmt.Sprintf("Your rent of %d BDT for %s at %s is due.\n", inv.TotalAmount, inv.MonthYear, propName))
-		b.WriteString(fmt.Sprintf("View invoice: %s/%s\n", types.InvoiceBaseURL, inv.ID))
-	} else {
-		b.WriteString(fmt.Sprintf("Your total rent of %d BDT for %d months at %s is due.\n", totalDue, len(invoices), propName))
-		for _, inv := range invoices {
-			b.WriteString(fmt.Sprintf("  - %s (%d BDT) - %s/%s\n", inv.MonthYear, inv.TotalAmount, types.InvoiceBaseURL, inv.ID))
-		}
-	}
-	b.WriteString("Please pay on time. Thank you.")
-	return b.String()
+func buildBillNotificationMsg(name, propertyName, monthYear string, amount int, invoiceID string) string {
+	return fmt.Sprintf(
+		"Dear %s, your rent bill of %d BDT for %s at %s has been generated. View bill: %s/%s",
+		name, amount, monthYear, propertyName, types.InvoiceBaseURL, invoiceID,
+	)
 }

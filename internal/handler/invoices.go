@@ -64,10 +64,39 @@ func (h *Handler) HandleListUnpaidInvoicesForOwner(c *gin.Context) {
 	c.JSON(http.StatusOK, invoices)
 }
 
+func (h *Handler) HandleGenerateMonthlyBills(c *gin.Context) {
+	var req struct {
+		MonthYear   string   `json:"monthYear" binding:"required"`
+		PropertyIDs []string `json:"propertyIds"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, types.ErrorResp{Error: err.Error()})
+		return
+	}
+	if _, err := time.Parse("January 2006", req.MonthYear); err != nil {
+		c.JSON(http.StatusBadRequest, types.ErrorResp{Error: "monthYear must use the format 'January 2006'"})
+		return
+	}
+	result, err := h.Store.GenerateMonthlyBillsForOwner(
+		c.Request.Context(),
+		middleware.UserID(c),
+		req.MonthYear,
+		req.PropertyIDs...,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, types.ErrorResp{Error: err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
 // HandleGetInvoicePublic serves the unauthenticated invoice-view link
 // shared over SMS (mirrors the existing /invoice/:id behavior).
 func (h *Handler) HandleGetInvoicePublic(c *gin.Context) {
-	inv, err := h.Store.GetInvoice(c.Request.Context(), c.Param("invoiceId"))
+	inv, err := h.Store.GetInvoiceWithDisplayDetails(
+		c.Request.Context(),
+		c.Param("invoiceId"),
+	)
 	if err != nil {
 		c.JSON(http.StatusNotFound, types.ErrorResp{Error: "invoice not found"})
 		return

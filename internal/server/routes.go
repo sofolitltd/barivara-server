@@ -63,6 +63,8 @@ func newRouter(h *handler.Handler) *gin.Engine {
 	landlord.PUT("/properties/:propertyId", h.HandleUpdateProperty)
 	landlord.DELETE("/properties/:propertyId", h.HandleDeleteProperty)
 	landlord.GET("/unpaid-invoices", h.HandleListUnpaidInvoicesForOwner)
+	landlord.POST("/monthly-bills/generate", h.HandleGenerateMonthlyBills)
+	landlord.POST("/renters/:renterId/reminder", h.HandleSendRenterReminder)
 	landlord.GET("/renters/:renterId", h.HandleGetRenterByID)
 	landlord.POST("/renters/:renterId/conversation", h.HandleGetOrCreateConversation)
 	landlord.GET("/conversations", h.HandleListLandlordConversations)
@@ -120,11 +122,19 @@ func newRouter(h *handler.Handler) *gin.Engine {
 	tenant.GET("/unit", h.HandleMyUnit)
 	tenant.GET("/invoices", h.HandleMyInvoices)
 	tenant.GET("/conversation", h.HandleGetTenantConversation)
+	tenant.GET("/conversations", h.HandleListTenantConversations)
+	tenant.GET("/contacts", h.HandleListTenantContacts)
+	tenant.POST("/conversations/requests", h.HandleRequestTenantConversation)
+	tenant.POST("/conversations/:conversationId/accept", h.HandleAcceptTenantConversation)
+	tenant.POST("/conversations/:conversationId/reject", h.HandleRejectTenantConversation)
 	tenant.GET("/notices", h.HandleListTenantNotices)
 	tenant.POST("/notices/:noticeId/read", h.HandleMarkTenantNoticeRead)
 
+	authed.GET("/conversations/:conversationId", h.HandleGetConversation)
 	authed.GET("/conversations/:conversationId/messages", h.HandleListConversationMessages)
 	authed.POST("/conversations/:conversationId/messages", h.HandleSendConversationMessage)
+	authed.PUT("/conversations/:conversationId/messages/:messageId", h.HandleEditConversationMessage)
+	authed.POST("/conversations/:conversationId/messages/:messageId/delete", h.HandleDeleteConversationMessage)
 
 	// --- Admin ---
 	admin := r.Group("/api/admin", auth, middleware.RequireRole("admin"))

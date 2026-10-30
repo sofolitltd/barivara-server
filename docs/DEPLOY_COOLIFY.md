@@ -40,13 +40,5 @@ HTTP readiness check and port routing.
 Required environment variables include `DATABASE_URL`, `JWT_SECRET`,
 `PORT`, and the optional SMS, Telegram, Firebase, and object-storage values.
 
-For Firebase, prefer Base64 in Coolify:
-
-```bash
-base64 < firebase-service-account.json | tr -d '\n'
-```
-
-Store the output in `FIREBASE_SERVICE_ACCOUNT_BASE64` as a runtime environment
-variable. The server also accepts the original JSON in
-`FIREBASE_SERVICE_ACCOUNT_JSON` or a mounted JSON file via
-`FIREBASE_CREDENTIALS_PATH`.
+Set the Firebase service-account JSON in `FIREBASE_SERVICE_ACCOUNT_JSON` as a
+runtime environment variable. Keep it out of Docker build arguments.

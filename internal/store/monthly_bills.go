@@ -11,23 +11,59 @@ import (
 )
 
 type MonthlyBillResult struct {
-	Created int `json:"created"`
-	Skipped int `json:"skipped"`
-	Failed  int `json:"failed"`
+	Created       int                       `json:"created"`
+	Skipped       int                       `json:"skipped"`
+	Failed        int                       `json:"failed"`
+	Notifications []MonthlyBillNotification `json:"-"`
+}
+
+type MonthlyBillNotification struct {
+	InvoiceID    string
+	RenterID     string
+	RenterName   string
+	Phone        string
+	MonthYear    string
+	TotalAmount  int
+	FcmToken     string
+	SmsEnabled   bool
+	PropertyName string
 }
 
 // GenerateMonthlyBills creates one invoice for every occupied unit. It is
 // safe to run repeatedly because the month/unit unique index makes reruns no-ops.
 func (s *Store) GenerateMonthlyBills(ctx context.Context, monthYear string, propertyIDs ...string) (MonthlyBillResult, error) {
+	propertyID := ""
+	if len(propertyIDs) > 0 {
+		propertyID = propertyIDs[0]
+	}
+	return s.generateMonthlyBills(ctx, monthYear, propertyID, "", nil)
+}
+
+func (s *Store) GenerateMonthlyBillsForOwner(ctx context.Context, ownerID, monthYear string, propertyIDs ...string) (MonthlyBillResult, error) {
+	return s.generateMonthlyBills(ctx, monthYear, "", ownerID, propertyIDs)
+}
+
+func (s *Store) generateMonthlyBills(ctx context.Context, monthYear, propertyID, ownerID string, ownerPropertyIDs []string) (MonthlyBillResult, error) {
 	query := `
-		SELECT u.id, u.property_id, u.base_rent, COALESCE(u.default_utilities, '{}'::jsonb), r.id, r.name, r.rent_history
+		SELECT u.id, u.property_id, p.name, u.base_rent, COALESCE(u.default_utilities, '{}'::jsonb),
+			r.id, r.name, r.rent_history, r.phone, r.sms_enabled, COALESCE(tenant.fcm_token, '')
 		FROM units u
+		JOIN properties p ON p.id=u.property_id
 		JOIN renters r ON r.unit_id=u.id AND r.property_id=u.property_id AND r.is_active=true
+		LEFT JOIN users tenant ON tenant.id=r.linked_user_id
 		WHERE (u.status='occupied' OR u.is_occupied=true)`
 	args := []any{}
-	if len(propertyIDs) > 0 && propertyIDs[0] != "" {
-		query += ` AND u.property_id=$1`
-		args = append(args, propertyIDs[0])
+	if propertyID != "" {
+		args = append(args, propertyID)
+		query += fmt.Sprintf(` AND u.property_id=$%d`, len(args))
+	}
+	if ownerID != "" {
+		args = append(args, ownerID)
+		query += fmt.Sprintf(` AND p.owner_id=$%d`, len(args))
+	}
+	if len(ownerPropertyIDs) > 0 {
+		args = append(args, ownerPropertyIDs)
+		query += fmt.Sprintf(` AND u.property_id::text = ANY($%d::text[])`, len(args))
 	}
 	rows, err := s.Pool.Query(ctx, query, args...)
 	if err != nil {
@@ -36,19 +72,24 @@ func (s *Store) GenerateMonthlyBills(ctx context.Context, monthYear string, prop
 	defer rows.Close()
 
 	var candidates []struct {
-		unitID, propertyID, renterID, renterName string
-		baseRent                                 int
-		utilitiesJSON                            []byte
-		rentHistoryJSON                          []byte
+		unitID, propertyID, propertyName, renterID, renterName string
+		baseRent                                               int
+		utilitiesJSON, rentHistoryJSON                         []byte
+		phone                                                  string
+		renterSmsEnabled                                       bool
+		fcmToken                                               string
 	}
 	for rows.Next() {
 		var c struct {
-			unitID, propertyID, renterID, renterName string
-			baseRent                                 int
-			utilitiesJSON                            []byte
-			rentHistoryJSON                          []byte
+			unitID, propertyID, propertyName, renterID, renterName string
+			baseRent                                               int
+			utilitiesJSON, rentHistoryJSON                         []byte
+			phone                                                  string
+			renterSmsEnabled                                       bool
+			fcmToken                                               string
 		}
-		if err := rows.Scan(&c.unitID, &c.propertyID, &c.baseRent, &c.utilitiesJSON, &c.renterID, &c.renterName, &c.rentHistoryJSON); err != nil {
+		if err := rows.Scan(&c.unitID, &c.propertyID, &c.propertyName, &c.baseRent, &c.utilitiesJSON,
+			&c.renterID, &c.renterName, &c.rentHistoryJSON, &c.phone, &c.renterSmsEnabled, &c.fcmToken); err != nil {
 			return MonthlyBillResult{}, err
 		}
 		candidates = append(candidates, c)
@@ -75,6 +116,22 @@ func (s *Store) GenerateMonthlyBills(ctx context.Context, monthYear string, prop
 		tx, err := s.Pool.Begin(ctx)
 		if err != nil {
 			result.Failed++
+			continue
+		}
+		legacyMonthYear := legacyMonthKey(monthYear)
+		var alreadyExists bool
+		if err := tx.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM invoices
+				WHERE unit_id=$1 AND (month_year=$2 OR month_year=$3)
+			)`, c.unitID, monthYear, legacyMonthYear).Scan(&alreadyExists); err != nil {
+			tx.Rollback(ctx)
+			result.Failed++
+			continue
+		}
+		if alreadyExists {
+			tx.Rollback(ctx)
+			result.Skipped++
 			continue
 		}
 		var current int
@@ -104,13 +161,33 @@ func (s *Store) GenerateMonthlyBills(ctx context.Context, monthYear string, prop
 			result.Skipped++
 			continue
 		}
+		var invoiceID string
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM invoices WHERE unit_id=$1 AND month_year=$2`,
+			c.unitID, monthYear).Scan(&invoiceID); err != nil {
+			tx.Rollback(ctx)
+			result.Failed++
+			continue
+		}
 		if err := tx.Commit(ctx); err != nil {
 			result.Failed++
 			continue
 		}
 		result.Created++
+		result.Notifications = append(result.Notifications, MonthlyBillNotification{
+			InvoiceID: invoiceID, RenterID: c.renterID, RenterName: c.renterName,
+			Phone: c.phone, MonthYear: monthYear, TotalAmount: baseRent + totalUtilities,
+			FcmToken: c.fcmToken, SmsEnabled: c.renterSmsEnabled, PropertyName: c.propertyName,
+		})
 	}
 	return result, nil
+}
+
+func legacyMonthKey(monthYear string) string {
+	month, err := time.Parse("January 2006", monthYear)
+	if err != nil {
+		return monthYear
+	}
+	return month.Format("2006-01")
 }
 
 func activeRentForMonth(history []models.TenantRentConfig, monthYear string) (int, bool) {

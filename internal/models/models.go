@@ -112,6 +112,7 @@ type Renter struct {
 	PhotoURL       *string               `json:"photoUrl,omitempty"`
 	MoveOutDate    *time.Time            `json:"moveOutDate,omitempty"`
 	IsActive       bool                  `json:"isActive"`
+	SmsEnabled     bool                  `json:"smsEnabled"`
 	FamilyMembers  []FamilyMember        `json:"familyMembers"`
 	Documents      []RenterDocument      `json:"documents"`
 	LandlordNotes  *string               `json:"landlordNotes,omitempty"`
@@ -131,9 +132,13 @@ type Payment struct {
 type Invoice struct {
 	ID            string         `json:"id"`
 	PropertyID    string         `json:"propertyId"`
+	PropertyName  string         `json:"propertyName,omitempty"`
 	UnitID        string         `json:"unitId"`
+	UnitNumber    string         `json:"unitNumber,omitempty"`
 	RenterID      *string        `json:"renterId,omitempty"`
 	RenterName    *string        `json:"renterName,omitempty"`
+	OwnerName     string         `json:"ownerName,omitempty"`
+	OwnerPhone    string         `json:"ownerPhone,omitempty"`
 	InvoiceNumber string         `json:"invoiceNumber"`
 	MonthYear     string         `json:"monthYear"`
 	BaseRent      int            `json:"baseRent"`
@@ -227,26 +232,47 @@ type Notice struct {
 }
 
 type Conversation struct {
-	ID           string     `json:"id"`
-	LandlordID   string     `json:"landlordId"`
-	RenterID     string     `json:"renterId"`
-	RenterName   string     `json:"renterName,omitempty"`
-	PropertyID   string     `json:"propertyId"`
-	PropertyName string     `json:"propertyName,omitempty"`
-	UnitID       string     `json:"unitId"`
-	UnitNumber   string     `json:"unitNumber,omitempty"`
-	CreatedAt    time.Time  `json:"createdAt"`
-	UpdatedAt    time.Time  `json:"updatedAt"`
-	LastMessage  string     `json:"lastMessage,omitempty"`
-	LastAt       *time.Time `json:"lastAt,omitempty"`
-	UnreadCount  int        `json:"unreadCount"`
+	ID              string     `json:"id"`
+	Type            string     `json:"type"`
+	Status          string     `json:"status"`
+	LandlordID      string     `json:"landlordId"`
+	RenterID        string     `json:"renterId"`
+	RenterName      string     `json:"renterName,omitempty"`
+	PeerName        string     `json:"peerName,omitempty"`
+	RequestSentByMe bool       `json:"requestSentByMe"`
+	PropertyID      string     `json:"propertyId"`
+	PropertyName    string     `json:"propertyName,omitempty"`
+	UnitID          string     `json:"unitId"`
+	UnitNumber      string     `json:"unitNumber,omitempty"`
+	CreatedAt       time.Time  `json:"createdAt"`
+	UpdatedAt       time.Time  `json:"updatedAt"`
+	LastMessage     string     `json:"lastMessage,omitempty"`
+	LastAt          *time.Time `json:"lastAt,omitempty"`
+	UnreadCount     int        `json:"unreadCount"`
+}
+
+type TenantContact struct {
+	UserID             string `json:"userId"`
+	Name               string `json:"name"`
+	UnitNumber         string `json:"unitNumber"`
+	ConversationID     string `json:"conversationId,omitempty"`
+	ConversationStatus string `json:"conversationStatus,omitempty"`
+	RequestSentByMe    bool   `json:"requestSentByMe"`
 }
 
 type ConversationMessage struct {
-	ID             string     `json:"id"`
-	ConversationID string     `json:"conversationId"`
-	SenderUserID   string     `json:"senderUserId"`
-	Body           string     `json:"body"`
-	CreatedAt      time.Time  `json:"createdAt"`
-	ReadAt         *time.Time `json:"readAt,omitempty"`
+	ID                 string     `json:"id"`
+	ConversationID     string     `json:"conversationId"`
+	SenderUserID       string     `json:"senderUserId"`
+	Body               string     `json:"body"`
+	CreatedAt          time.Time  `json:"createdAt"`
+	ReadAt             *time.Time `json:"readAt,omitempty"`
+	EditedAt           *time.Time `json:"editedAt,omitempty"`
+	DeletedForEveryone bool       `json:"deletedForEveryone"`
+}
+
+type ConversationPushTarget struct {
+	Token      string
+	SenderName string
+	PeerName   string
 }

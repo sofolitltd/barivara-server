@@ -13,9 +13,9 @@ your own VPS behind a reverse proxy (no serverless platform).
   directly by email)
 - Presigned upload/download URLs against Neon Object Storage
 - SMS rent reminders / payment receipts (`bulksmsbd.net`)
-- `GET /api/cron/check-reminders` — call this from your own cron (e.g. a
-  system crontab or systemd timer hitting it with `curl`) since there's no
-  platform cron here anymore
+- `GET /api/cron/check-reminders` — call hourly from your own cron (e.g. a
+  system crontab or systemd timer hitting it with `curl`). In Asia/Dhaka,
+  properties are processed at their configured billing day and hour.
 
 ## Setup
 
@@ -43,7 +43,6 @@ TELEGRAM_ADMIN_CHAT_ID=
 
 # optional — FCM push to the Android app (landlord-approval notification)
 FIREBASE_SERVICE_ACCOUNT_JSON=
-# or use FIREBASE_CREDENTIALS_PATH=/absolute/path/to/firebase-key.json
 
 # from `neon env pull`
 DATABASE_URL=postgres://...
@@ -99,6 +98,17 @@ Full route list: `internal/server/routes.go`. Highlights:
   `GET /api/cron/check-reminders`
 - `GET /api/invoices/:invoiceId` — public, unauthenticated invoice link
   (what the SMS templates below point to)
+
+The hourly cron generates each property's current-month rent bills at its
+configured day/time, then sends an app push notification. SMS is only used
+when push delivery is unavailable and both the property's SMS permission and
+the individual renter's SMS permission are enabled; both default to off.
+Example crontab entry (use the server's local timezone or configure
+`CRON_TZ=Asia/Dhaka`):
+
+```cron
+0 * * * * curl --fail --silent https://your-api-host/api/cron/check-reminders
+```
 
 ## Templates
 

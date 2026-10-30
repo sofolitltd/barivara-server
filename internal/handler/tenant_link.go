@@ -15,14 +15,16 @@ import (
 
 const codeChars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" // no 0/O/1/I confusion
 
-func randomCode() string {
+func randomCode() (string, error) {
 	b := make([]byte, 6)
-	_, _ = rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
 	out := make([]byte, 6)
 	for i, v := range b {
 		out[i] = codeChars[int(v)%len(codeChars)]
 	}
-	return string(out)
+	return string(out), nil
 }
 
 // --- Landlord side: nested under /api/properties/:propertyId/units/:unitId/renters/:renterId ---
@@ -31,7 +33,12 @@ func (h *Handler) HandleGenerateJoinCode(c *gin.Context) {
 	if _, ok := h.ownsProperty(c, c.Param("propertyId")); !ok {
 		return
 	}
-	code, err := h.Store.GenerateJoinCode(c.Request.Context(), c.Param("renterId"), randomCode())
+	code, err := randomCode()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, types.ErrorResp{Error: "could not generate join code"})
+		return
+	}
+	code, err = h.Store.GenerateJoinCode(c.Request.Context(), c.Param("renterId"), code)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, types.ErrorResp{Error: err.Error()})
 		return

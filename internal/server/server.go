@@ -2,14 +2,12 @@ package server
 
 import (
 	"context"
-	"encoding/base64"
 	"log"
 	"net/http"
 	"os"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
-
 	appauth "github.com/sofolitltd/barivara-server/internal/auth"
 	"github.com/sofolitltd/barivara-server/internal/db"
 	"github.com/sofolitltd/barivara-server/internal/handler"
@@ -40,26 +38,7 @@ func Run() {
 }
 
 func firebaseServiceAccount() string {
-	if encoded := os.Getenv("FIREBASE_SERVICE_ACCOUNT_BASE64"); encoded != "" {
-		data, err := base64.StdEncoding.DecodeString(encoded)
-		if err != nil {
-			log.Printf("FIREBASE_SERVICE_ACCOUNT_BASE64 is invalid: %v — FCM push notifications disabled", err)
-			return ""
-		}
-		return string(data)
-	}
-	if value := os.Getenv("FIREBASE_SERVICE_ACCOUNT_JSON"); value != "" {
-		return value
-	}
-	if path := os.Getenv("FIREBASE_CREDENTIALS_PATH"); path != "" {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			log.Printf("FIREBASE_CREDENTIALS_PATH %q unavailable: %v — FCM push notifications disabled", path, err)
-			return ""
-		}
-		return string(data)
-	}
-	return ""
+	return os.Getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
 }
 
 // build wires the DB pool, object storage client, SMS sender, and JWT
@@ -115,7 +94,7 @@ func build() (*handler.Handler, func()) {
 		log.Fatalf("firebase push init failed: %v", err)
 	}
 	if pushNotifier == nil {
-		log.Println("FIREBASE_SERVICE_ACCOUNT_JSON/FIREBASE_CREDENTIALS_PATH not set — FCM push notifications disabled")
+		log.Println("FIREBASE_SERVICE_ACCOUNT_JSON not set — FCM push notifications disabled")
 	}
 
 	st := store.New(pool)

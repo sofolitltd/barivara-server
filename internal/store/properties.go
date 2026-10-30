@@ -82,10 +82,10 @@ func (s *Store) DeleteProperty(ctx context.Context, id string) error {
 	return err
 }
 
-func (s *Store) QueryPropertiesByReminderDay(ctx context.Context, day int) ([]models.Property, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT `+propertyCols+` FROM properties WHERE reminder_day = $1`, day)
+func (s *Store) QueryPropertiesByReminderSchedule(ctx context.Context, day, hour int) ([]models.Property, error) {
+	rows, err := s.Pool.Query(ctx, `SELECT `+propertyCols+` FROM properties WHERE reminder_day = $1 AND reminder_hour = $2`, day, hour)
 	if err != nil {
-		return nil, fmt.Errorf("query properties by reminder day: %w", err)
+		return nil, fmt.Errorf("query properties by billing schedule: %w", err)
 	}
 	defer rows.Close()
 

@@ -109,6 +109,26 @@ func (s *Store) GetInvoice(ctx context.Context, id string) (*models.Invoice, err
 	return scanInvoice(row)
 }
 
+func (s *Store) GetInvoiceWithDisplayDetails(ctx context.Context, id string) (*models.Invoice, error) {
+	inv, err := s.GetInvoice(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	err = s.Pool.QueryRow(ctx, `
+		SELECT p.name, u.unit_number, landlord_user.name, landlord_user.phone
+		FROM invoices i
+		JOIN properties p ON p.id = i.property_id
+		JOIN units u ON u.id = i.unit_id
+		JOIN users landlord_user ON landlord_user.id = p.owner_id
+		WHERE i.id = $1
+	`, id).Scan(&inv.PropertyName, &inv.UnitNumber, &inv.OwnerName, &inv.OwnerPhone)
+	if err != nil {
+		return nil, fmt.Errorf("load invoice display details: %w", err)
+	}
+	return inv, nil
+}
+
 func (s *Store) ListInvoicesByUnit(ctx context.Context, propertyID, unitID string) ([]models.Invoice, error) {
 	rows, err := s.Pool.Query(ctx, `SELECT `+invoiceCols+` FROM invoices WHERE property_id=$1 AND unit_id=$2 ORDER BY created_at DESC`, propertyID, unitID)
 	if err != nil {

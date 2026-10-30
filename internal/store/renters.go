@@ -14,7 +14,7 @@ import (
 
 const renterCols = `id, property_id, unit_id, name, phone, nid, advance_deposit, move_in_date, email,
 	occupation, alternate_phone, photo_url, move_out_date, is_active, family_members, documents,
-	landlord_notes, join_code, linked_user_id, rent_history, deposit_history`
+	sms_enabled, landlord_notes, join_code, linked_user_id, rent_history, deposit_history`
 
 func scanRenter(row pgx.Row) (*models.Renter, error) {
 	var r models.Renter
@@ -22,7 +22,7 @@ func scanRenter(row pgx.Row) (*models.Renter, error) {
 
 	if err := row.Scan(&r.ID, &r.PropertyID, &r.UnitID, &r.Name, &r.Phone, &r.Nid, &r.AdvanceDeposit,
 		&r.MoveInDate, &r.Email, &r.Occupation, &r.AlternatePhone, &r.PhotoURL, &r.MoveOutDate,
-		&r.IsActive, &familyMembers, &documents, &r.LandlordNotes, &r.JoinCode, &r.LinkedUserID,
+		&r.IsActive, &familyMembers, &documents, &r.SmsEnabled, &r.LandlordNotes, &r.JoinCode, &r.LinkedUserID,
 		&rentHistory, &depositHistory); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -75,13 +75,13 @@ func (s *Store) CreateRenter(ctx context.Context, r models.Renter) (*models.Rent
 	}
 	row := s.Pool.QueryRow(ctx, `
 		INSERT INTO renters (property_id, unit_id, name, phone, nid, advance_deposit, move_in_date, email,
-			occupation, alternate_phone, photo_url, is_active, family_members, documents, landlord_notes,
-			rent_history, deposit_history)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,true,$12,$13,$14,$15,$16)
+			occupation, alternate_phone, photo_url, is_active, family_members, documents, sms_enabled, landlord_notes,
+			join_code, rent_history, deposit_history)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,true,$12,$13,$14,$15,$16,$17,$18)
 		RETURNING `+renterCols,
 		r.PropertyID, r.UnitID, r.Name, r.Phone, r.Nid, r.AdvanceDeposit, r.MoveInDate, r.Email,
-		r.Occupation, r.AlternatePhone, r.PhotoURL, toJSON(r.FamilyMembers), toJSON(r.Documents), r.LandlordNotes,
-		toJSON(r.RentHistory), toJSON(r.DepositHistory))
+		r.Occupation, r.AlternatePhone, r.PhotoURL, toJSON(r.FamilyMembers), toJSON(r.Documents), r.SmsEnabled,
+		r.LandlordNotes, r.JoinCode, toJSON(r.RentHistory), toJSON(r.DepositHistory))
 	renter, err := scanRenter(row)
 	if err != nil {
 		return nil, err
@@ -142,12 +142,12 @@ func (s *Store) UpdateRenter(ctx context.Context, r models.Renter) (*models.Rent
 	row := s.Pool.QueryRow(ctx, `
 		UPDATE renters SET name=$2, phone=$3, nid=$4, advance_deposit=$5, move_in_date=$6, email=$7,
 			occupation=$8, alternate_phone=$9, photo_url=$10, move_out_date=$11, is_active=$12,
-			family_members=$13, documents=$14, landlord_notes=$15, rent_history=$16, deposit_history=$17
+			family_members=$13, documents=$14, sms_enabled=$15, landlord_notes=$16, rent_history=$17, deposit_history=$18
 		WHERE id = $1
 		RETURNING `+renterCols,
 		r.ID, r.Name, r.Phone, r.Nid, r.AdvanceDeposit, r.MoveInDate, r.Email, r.Occupation,
 		r.AlternatePhone, r.PhotoURL, r.MoveOutDate, r.IsActive, toJSON(r.FamilyMembers), toJSON(r.Documents),
-		r.LandlordNotes, toJSON(r.RentHistory), toJSON(r.DepositHistory))
+		r.SmsEnabled, r.LandlordNotes, toJSON(r.RentHistory), toJSON(r.DepositHistory))
 	return scanRenter(row)
 }
 
