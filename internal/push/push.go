@@ -4,6 +4,7 @@ package push
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	firebase "firebase.google.com/go/v4"
@@ -21,7 +22,16 @@ func New(ctx context.Context, serviceAccountJSON string) (*Notifier, error) {
 	if serviceAccountJSON == "" {
 		return nil, nil
 	}
-	app, err := firebase.NewApp(ctx, nil, option.WithCredentialsJSON([]byte(serviceAccountJSON)))
+	var credentials struct {
+		ProjectID string `json:"project_id"`
+	}
+	if err := json.Unmarshal([]byte(serviceAccountJSON), &credentials); err != nil {
+		return nil, fmt.Errorf("firebase credentials JSON: %w", err)
+	}
+	if credentials.ProjectID == "" {
+		return nil, fmt.Errorf("firebase credentials JSON: project_id is required")
+	}
+	app, err := firebase.NewApp(ctx, &firebase.Config{ProjectID: credentials.ProjectID}, option.WithCredentialsJSON([]byte(serviceAccountJSON)))
 	if err != nil {
 		return nil, fmt.Errorf("firebase init: %w", err)
 	}
